@@ -43,10 +43,14 @@ def load_documentation(file_path):
         return "Documentation file not found."
 
 
-def load_state():
+def load_state(config_path):
     """Load the state file containing processed email UIDs per folder."""
-    if os.path.exists(CONFIG["state_file"]):
-        with open(CONFIG["state_file"], "r") as f:
+    # Make state file path relative to config file directory
+    config_dir = os.path.dirname(os.path.abspath(config_path))
+    state_file_path = os.path.join(config_dir, CONFIG["state_file"])
+
+    if os.path.exists(state_file_path):
+        with open(state_file_path, "r") as f:
             state = json.load(f)
             # Ensure each folder has an entry
             for folder in CONFIG["folders"]:
@@ -57,9 +61,13 @@ def load_state():
     return {folder: {"processed_uids": []} for folder in CONFIG["folders"]}
 
 
-def save_state(state):
+def save_state(state, config_path):
     """Save the state file with processed email UIDs per folder."""
-    with open(CONFIG["state_file"], "w") as f:
+    # Make state file path relative to config file directory
+    config_dir = os.path.dirname(os.path.abspath(config_path))
+    state_file_path = os.path.join(config_dir, CONFIG["state_file"])
+
+    with open(state_file_path, "w") as f:
         json.dump(state, f, indent=2)
 
 
@@ -278,7 +286,7 @@ def process_new_emails(mailbox, folder_name, folder_state):
     return processed_count
 
 
-def main():
+def main(config_path):
     """Main monitoring loop."""
     print("Starting AI-powered email support monitor...")
     print(f"Server: {CONFIG['imap_server']}")
@@ -298,7 +306,7 @@ def main():
         print("Please check your API key and model name")
         return
 
-    state = load_state()
+    state = load_state(config_path)
 
     while True:
         try:
@@ -330,7 +338,7 @@ def main():
                         continue
 
                 if total_processed > 0:
-                    save_state(state)
+                    save_state(state, config_path)
                     print(
                         f"\nTotal: Processed {total_processed} new email(s) across all folders"
                     )
@@ -364,7 +372,7 @@ if __name__ == "__main__":
     CONFIG = load_config(args.config)
 
     try:
-        main()
+        main(args.config)
     except KeyboardInterrupt:
         print("\n\nMonitoring stopped by user.")
     except Exception as e:
