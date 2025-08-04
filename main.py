@@ -56,13 +56,26 @@ def load_state(config_path):
     if os.path.exists(state_file_path):
         with open(state_file_path, "r") as f:
             state = json.load(f)
-            # Ensure each folder has an entry
+            # Ensure each folder has an entry with all required fields
             for folder in CONFIG["folders"]:
                 if folder not in state:
-                    state[folder] = {"processed_uids": []}
+                    state[folder] = {
+                        "processed_uids": [],
+                        "failed_emails": [],
+                        "retry_counts": {},
+                    }
+                else:
+                    # Ensure existing folders have all required fields
+                    if "failed_emails" not in state[folder]:
+                        state[folder]["failed_emails"] = []
+                    if "retry_counts" not in state[folder]:
+                        state[folder]["retry_counts"] = {}
             return state
-    # Initialize state for all folders
-    return {folder: {"processed_uids": []} for folder in CONFIG["folders"]}
+    # Initialize state for all folders with all required fields
+    return {
+        folder: {"processed_uids": [], "failed_emails": [], "retry_counts": {}}
+        for folder in CONFIG["folders"]
+    }
 
 
 def save_state(state, config_path):
@@ -264,29 +277,77 @@ def send_reply(original_email, reply_content, folder_name):
 def process_new_emails(mailbox, folder_name, folder_state, config_path):
     """Check for new emails and process them for a specific folder."""
     processed_count = 0
+    max_retries = 3  # Total of 3 attempts (initial + 2 retries)
 
     # Fetch all emails in the monitored folder
     for msg in mailbox.fetch(AND(all=True)):
-        # Check if we've already processed this email
-        if msg.uid not in folder_state["processed_uids"]:
-            print(f"\nNew email detected in '{folder_name}':")
-            print(f"  From: {msg.from_}")
-            print(f"  Subject: {msg.subject}")
-            print(f"  Date: {msg.date}")
+        uid_str = str(msg.uid)  # Convert to string for JSON serialization
 
-            try:
-                # Generate reply content using folder-specific configuration
-                reply_content = generate_reply_content(msg, folder_name, config_path)
+        # Check if we've already successfully processed this email
+        if msg.uid in folder_state["processed_uids"]:
+            continue
 
-                # Send the reply with confirmation
-                confirm_and_send_reply(msg, reply_content, folder_name)
+        # Check retry count
+        retry_count = folder_state["retry_counts"].get(uid_str, 0)
 
-                # Mark as processed
-                folder_state["processed_uids"].append(msg.uid)
-                processed_count += 1
+        # Skip if we've exceeded max retries
+        if retry_count >= max_retries:
+            continue
 
-            except Exception as e:
-                print(f"Error processing email {msg.uid}: {str(e)}")
+        print(f"\nEmail detected in '{folder_name}':")
+        print(f"  From: {msg.from_}")
+        print(f"  Subject: {msg.subject}")
+        print(f"  Date: {msg.date}")
+        if retry_count > 0:
+            print(f"  Retry attempt: {retry_count}/{max_retries - 1}")
+
+        try:
+            # Generate reply content using folder-specific configuration
+            reply_content = generate_reply_content(msg, folder_name, config_path)
+
+            # Send the reply with confirmation
+            confirm_and_send_reply(msg, reply_content, folder_name)
+
+            # Mark as successfully processed
+            folder_state["processed_uids"].append(msg.uid)
+            # Remove from retry counts if it was there
+            if uid_str in folder_state["retry_counts"]:
+                del folder_state["retry_counts"][uid_str]
+            processed_count += 1
+
+        except Exception as e:
+            # Increment retry count
+            folder_state["retry_counts"][uid_str] = retry_count + 1
+
+            # Log detailed error information
+            error_msg = (
+                f"Error processing email {msg.uid} in folder '{folder_name}': {str(e)}"
+            )
+            print(f"\n{error_msg}")
+
+            # If this was the last retry, mark as permanently failed
+            if folder_state["retry_counts"][uid_str] >= max_retries:
+                print(
+                    f"  Maximum retries ({max_retries}) reached. Marking as permanently failed."
+                )
+
+                # Track failed emails in state
+                if "failed_emails" not in folder_state:
+                    folder_state["failed_emails"] = []
+
+                folder_state["failed_emails"].append(
+                    {
+                        "uid": msg.uid,
+                        "timestamp": datetime.now(UTC).isoformat(),
+                        "error": str(e),
+                        "subject": msg.subject,
+                        "from": msg.from_,
+                        "retry_count": max_retries,
+                    }
+                )
+            else:
+                remaining_retries = max_retries - folder_state["retry_counts"][uid_str]
+                print(f"  Will retry {remaining_retries} more time(s) in future runs.")
 
     return processed_count
 
