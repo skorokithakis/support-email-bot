@@ -12,16 +12,21 @@ import time
 from datetime import datetime, timezone
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from typing import Any, Optional
 
 from imap_tools import AND
 from imap_tools import MailBox
+from imap_tools import MailMessage
 from openai import OpenAI
 
 UTC = timezone.utc
 
+# Global configuration variable
+CONFIG: dict[str, Any] = {}
+
 
 # Load configuration from JSON file
-def load_config(config_path="config.json"):
+def load_config(config_path: str = "config.json") -> dict[str, Any]:
     """Load configuration from specified JSON file."""
     if not os.path.exists(config_path):
         raise FileNotFoundError(f"Configuration file {config_path} not found.")
@@ -31,10 +36,10 @@ def load_config(config_path="config.json"):
 
 
 # Initialize OpenAI client (will be set after loading config)
-client = None
+client: Optional[OpenAI] = None
 
 
-def load_documentation(file_path, config_path):
+def load_documentation(file_path: str, config_path: str) -> str:
     """Load documentation content from file."""
     # Make documentation file path relative to config file directory
     config_dir = os.path.dirname(os.path.abspath(config_path))
@@ -47,7 +52,7 @@ def load_documentation(file_path, config_path):
         return "Documentation file not found."
 
 
-def load_state(config_path):
+def load_state(config_path: str) -> dict[str, dict[str, Any]]:
     """Load the state file containing processed email UIDs per folder."""
     # Make state file path relative to config file directory
     config_dir = os.path.dirname(os.path.abspath(config_path))
@@ -78,7 +83,7 @@ def load_state(config_path):
     }
 
 
-def save_state(state, config_path):
+def save_state(state: dict[str, dict[str, Any]], config_path: str) -> None:
     """Save the state file with processed email UIDs per folder."""
     # Make state file path relative to config file directory
     config_dir = os.path.dirname(os.path.abspath(config_path))
@@ -88,7 +93,9 @@ def save_state(state, config_path):
         json.dump(state, f, indent=2)
 
 
-def generate_reply_content(original_email, folder_name, config_path):
+def generate_reply_content(
+    original_email: MailMessage, folder_name: str, config_path: str
+) -> dict[str, Optional[str]]:
     """
     Use OpenAI to generate an intelligent support response.
 
@@ -145,6 +152,7 @@ Please write a helpful and professional response to this customer email. Make su
 """
 
         # Call OpenAI API
+        assert client is not None, "OpenAI client not initialized"
         response = client.chat.completions.create(
             model=CONFIG["model"],
             messages=[
@@ -186,40 +194,60 @@ Best regards,
         }
 
 
-def confirm_and_send_reply(original_email, reply_content, folder_name):
-    """Print the reply and ask for confirmation before sending."""
-    print("\n" + "=" * 60)
-    print("PROPOSED EMAIL RESPONSE:")
-    print("=" * 60)
-    print(f"To: {original_email.from_}")
-    print(f"From: {CONFIG['email']}")
-    print(f"Subject: {reply_content['subject']}")
-    print("-" * 60)
-    print("Body:")
-    print(reply_content["body"])
-    print("=" * 60)
+def confirm_and_send_reply(
+    original_email: MailMessage,
+    reply_content: dict[str, Optional[str]],
+    folder_name: str,
+    confirm: bool,
+) -> bool:
+    """Print the reply and ask for confirmation before sending if confirm flag is True."""
+    if confirm:
+        # Show the email and ask for confirmation
+        print("\n" + "=" * 60)
+        print("PROPOSED EMAIL RESPONSE:")
+        print("=" * 60)
+        print(f"To: {original_email.from_}")
+        print(f"From: {CONFIG['email']}")
+        print(f"Subject: {reply_content['subject']}")
+        print("-" * 60)
+        print("Body:")
+        print(reply_content["body"])
+        print("=" * 60)
 
-    # Ask for confirmation.
-    while True:
-        response = input("\nSend this email? (y/n): ").strip().lower()
-        if response == "y":
-            print("Sending...")
-            send_reply(original_email, reply_content, folder_name)
-            return True
-        elif response == "n":
-            print("Email cancelled.")
-            return False
-        else:
-            print("Please enter 'y' or 'n'.")
+        # Ask for confirmation.
+        while True:
+            response = input("\nSend this email? (y/n): ").strip().lower()
+            if response == "y":
+                print("Sending...")
+                send_reply(original_email, reply_content, folder_name)
+                return True
+            elif response == "n":
+                print("Email cancelled.")
+                return False
+            else:
+                print("Please enter 'y' or 'n'.")
+    else:
+        # Send without confirmation
+        print(
+            f"\nSending reply to {original_email.from_} for: {original_email.subject}"
+        )
+        send_reply(original_email, reply_content, folder_name)
+        return True
 
 
-def send_reply(original_email, reply_content, folder_name):
+def send_reply(
+    original_email: MailMessage,
+    reply_content: dict[str, Optional[str]],
+    folder_name: str,
+) -> None:
     """Send a reply to the original email with proper headers."""
     # Create message
     msg = MIMEMultipart("mixed")
 
     # Set headers for proper threading
-    msg["Subject"] = reply_content["subject"]
+    subject = reply_content["subject"]
+    assert subject is not None, "Reply subject cannot be None"
+    msg["Subject"] = subject
     msg["From"] = CONFIG["email"]
     msg["To"] = original_email.from_
     msg["In-Reply-To"] = original_email.headers.get("message-id", [""])[0]
@@ -229,10 +257,13 @@ def send_reply(original_email, reply_content, folder_name):
 
     # Add body
     body = MIMEMultipart("alternative")
-    body.attach(MIMEText(reply_content["body"], "plain"))
+    body_text = reply_content["body"]
+    assert body_text is not None, "Reply body cannot be None"
+    body.attach(MIMEText(body_text, "plain"))
 
-    if reply_content.get("html"):
-        body.attach(MIMEText(reply_content["html"], "html"))
+    html_content = reply_content.get("html")
+    if html_content:
+        body.attach(MIMEText(html_content, "html"))
 
     msg.attach(body)
 
@@ -274,7 +305,13 @@ def send_reply(original_email, reply_content, folder_name):
         print(f"Warning: Could not save to folder '{folder_name}': {str(e)}")
 
 
-def process_new_emails(mailbox, folder_name, folder_state, config_path):
+def process_new_emails(
+    mailbox: MailBox,
+    folder_name: str,
+    folder_state: dict[str, Any],
+    config_path: str,
+    confirm: bool,
+) -> int:
     """Check for new emails and process them for a specific folder."""
     processed_count = 0
     max_retries = 3  # Total of 3 attempts (initial + 2 retries)
@@ -305,8 +342,8 @@ def process_new_emails(mailbox, folder_name, folder_state, config_path):
             # Generate reply content using folder-specific configuration
             reply_content = generate_reply_content(msg, folder_name, config_path)
 
-            # Send the reply with confirmation
-            confirm_and_send_reply(msg, reply_content, folder_name)
+            # Send the reply with or without confirmation based on flag
+            confirm_and_send_reply(msg, reply_content, folder_name, confirm)
 
             # Mark as successfully processed
             folder_state["processed_uids"].append(msg.uid)
@@ -352,7 +389,7 @@ def process_new_emails(mailbox, folder_name, folder_state, config_path):
     return processed_count
 
 
-def main(config_path):
+def main(config_path: str, confirm: bool) -> None:
     """Main monitoring loop."""
     global client
 
@@ -400,7 +437,11 @@ def main(config_path):
 
                         # Process new emails for this folder
                         processed = process_new_emails(
-                            mailbox, folder_name, state[folder_name], config_path
+                            mailbox,
+                            folder_name,
+                            state[folder_name],
+                            config_path,
+                            confirm,
                         )
                         total_processed += processed
 
@@ -442,13 +483,18 @@ if __name__ == "__main__":
         default="config.json",
         help="Path to configuration file (default: config.json)",
     )
+    parser.add_argument(
+        "--confirm",
+        action="store_true",
+        help="Ask for confirmation before sending each email (default: send without confirmation)",
+    )
     args = parser.parse_args()
 
     # Load configuration with specified path
     CONFIG = load_config(args.config)
 
     try:
-        main(args.config)
+        main(args.config, args.confirm)
     except KeyboardInterrupt:
         print("\n\nMonitoring stopped by user.")
     except Exception as e:
