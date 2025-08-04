@@ -30,8 +30,8 @@ def load_config(config_path="config.json"):
         return json.load(f)
 
 
-# Initialize OpenAI client
-client = OpenAI()
+# Initialize OpenAI client (will be set after loading config)
+client = None
 
 
 def load_documentation(file_path):
@@ -288,6 +288,16 @@ def process_new_emails(mailbox, folder_name, folder_state):
 
 def main(config_path):
     """Main monitoring loop."""
+    global client
+
+    # Initialize OpenAI client with API key from config
+    if "openai_api_key" not in CONFIG:
+        print("Error: 'openai_api_key' not found in configuration file")
+        print("Please add your OpenAI API key to the config file")
+        return
+
+    client = OpenAI(api_key=CONFIG["openai_api_key"])
+
     print("Starting AI-powered email support monitor...")
     print(f"Server: {CONFIG['imap_server']}")
     print(f"Account: {CONFIG['email']}")
