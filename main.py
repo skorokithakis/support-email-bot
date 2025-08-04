@@ -3,6 +3,7 @@
 IMAP Email Monitor and Auto-Reply Script with OpenAI Integration
 Monitors multiple folders for new emails and uses OpenAI to generate intelligent support responses.
 """
+import argparse
 import json
 import os
 import smtplib
@@ -17,18 +18,13 @@ from openai import OpenAI
 
 
 # Load configuration from JSON file
-def load_config():
-    """Load configuration from config.json file."""
-    config_path = "config.json"
+def load_config(config_path="config.json"):
+    """Load configuration from specified JSON file."""
     if not os.path.exists(config_path):
         raise FileNotFoundError(f"Configuration file {config_path} not found.")
 
     with open(config_path, "r") as f:
         return json.load(f)
-
-
-# Load configuration
-CONFIG = load_config()
 
 # Initialize OpenAI client
 client = OpenAI()
@@ -295,6 +291,21 @@ def main():
 
 
 if __name__ == "__main__":
+    # Parse command-line arguments
+    parser = argparse.ArgumentParser(
+        description="IMAP Email Monitor and Auto-Reply Script with OpenAI Integration"
+    )
+    parser.add_argument(
+        "-c",
+        "--config",
+        default="config.json",
+        help="Path to configuration file (default: config.json)",
+    )
+    args = parser.parse_args()
+
+    # Load configuration with specified path
+    CONFIG = load_config(args.config)
+
     try:
         main()
     except KeyboardInterrupt:
