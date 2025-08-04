@@ -1,0 +1,8 @@
+services:
+  support-email-bot:
+    build: .
+    restart: unless-stopped
+    volumes:
+      - ./config:/app/config
+    environment:
+      - TZ=UTC
