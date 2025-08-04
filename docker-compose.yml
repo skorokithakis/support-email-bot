@@ -1,8 +1,8 @@
 services:
-  support-email-bot:
+  main:
     build: .
     restart: unless-stopped
     volumes:
-      - ./config:/app/config
+      - ${HM_DATA_DIR}:/app/config
     environment:
       - TZ=UTC
