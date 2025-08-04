@@ -201,6 +201,9 @@ def confirm_and_send_reply(
     confirm: bool,
 ) -> bool:
     """Print the reply and ask for confirmation before sending if confirm flag is True."""
+    # Check if send_emails is configured. If not present, default to dry-run mode.
+    send_emails = CONFIG.get("send_emails", False)
+
     if confirm:
         # Show the email and ask for confirmation
         print("\n" + "=" * 60)
@@ -218,8 +221,11 @@ def confirm_and_send_reply(
         while True:
             response = input("\nSend this email? (y/n): ").strip().lower()
             if response == "y":
-                print("Sending...")
-                send_reply(original_email, reply_content, folder_name)
+                if send_emails:
+                    print("Sending...")
+                    send_reply(original_email, reply_content, folder_name)
+                else:
+                    print("DRY RUN: Email would be sent (send_emails is false)")
                 return True
             elif response == "n":
                 print("Email cancelled.")
@@ -227,11 +233,25 @@ def confirm_and_send_reply(
             else:
                 print("Please enter 'y' or 'n'.")
     else:
-        # Send without confirmation
-        print(
-            f"\nSending reply to {original_email.from_} for: {original_email.subject}"
-        )
-        send_reply(original_email, reply_content, folder_name)
+        # Without confirmation mode
+        if send_emails:
+            print(
+                f"\nSending reply to {original_email.from_} for: {original_email.subject}"
+            )
+            send_reply(original_email, reply_content, folder_name)
+        else:
+            # Dry run mode - just print the email
+            print("\n" + "=" * 60)
+            print("DRY RUN MODE (send_emails is false)")
+            print("=" * 60)
+            print(f"To: {original_email.from_}")
+            print(f"From: {CONFIG['email']}")
+            print(f"Subject: {reply_content['subject']}")
+            print("-" * 60)
+            print("Body:")
+            print(reply_content["body"])
+            print("=" * 60)
+            print("Email NOT sent - dry run mode\n")
         return True
 
 
@@ -408,6 +428,9 @@ def main(config_path: str, confirm: bool) -> None:
     print(f"Check interval: {CONFIG['check_interval']} seconds")
     print(f"AI Model: {CONFIG['model']}")
     print(f"Company: {CONFIG.get('company_name', 'Not specified')}")
+    print(
+        f"Email mode: {'SENDING EMAILS' if CONFIG.get('send_emails', False) else 'DRY RUN (not sending emails)'}"
+    )
     print("-" * 50)
 
     # Test OpenAI connection

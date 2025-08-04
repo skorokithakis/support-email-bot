@@ -41,3 +41,4 @@ The `config.json` file controls:
 - Monitoring intervals
 - AI model selection
 - Folder-specific documentation and response prompts
+- `send_emails` (boolean): If `true`, emails will be sent. If `false` or not present, runs in dry-run mode and only prints the replies without sending them.

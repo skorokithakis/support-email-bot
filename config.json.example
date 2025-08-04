@@ -1,0 +1,21 @@
+{
+  "email": "support@company.com",
+  "password": "your-email-password",
+  "imap_server": "imap.gmail.com",
+  "imap_port": 993,
+  "smtp_server": "smtp.gmail.com",
+  "smtp_port": 587,
+  "check_interval": 30,
+  "state_file": "email_state.json",
+  "model": "gpt-4",
+  "openai_api_key": "your-openai-api-key",
+  "company_name": "Your Company",
+  "support_email": "support@company.com",
+  "send_emails": true,
+  "folders": {
+    "INBOX": {
+      "documentation_file": "support_documentation/general.md",
+      "prompt": "You are a support agent for {company_name}. Be helpful and professional."
+    }
+  }
+}
