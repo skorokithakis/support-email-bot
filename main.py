@@ -34,10 +34,14 @@ def load_config(config_path="config.json"):
 client = None
 
 
-def load_documentation(file_path):
+def load_documentation(file_path, config_path):
     """Load documentation content from file."""
-    if os.path.exists(file_path):
-        with open(file_path, "r") as f:
+    # Make documentation file path relative to config file directory
+    config_dir = os.path.dirname(os.path.abspath(config_path))
+    doc_file_path = os.path.join(config_dir, file_path)
+
+    if os.path.exists(doc_file_path):
+        with open(doc_file_path, "r") as f:
             return f.read()
     else:
         return "Documentation file not found."
@@ -71,13 +75,14 @@ def save_state(state, config_path):
         json.dump(state, f, indent=2)
 
 
-def generate_reply_content(original_email, folder_name):
+def generate_reply_content(original_email, folder_name, config_path):
     """
     Use OpenAI to generate an intelligent support response.
 
     Args:
         original_email: MailMessage object from imap_tools
         folder_name: Name of the folder being processed
+        config_path: Path to the config file
 
     Returns:
         dict with 'subject', 'body', and optionally 'html' keys
@@ -91,7 +96,7 @@ def generate_reply_content(original_email, folder_name):
         # Load documentation if available
         documentation = ""
         if documentation_file:
-            documentation = load_documentation(documentation_file)
+            documentation = load_documentation(documentation_file, config_path)
 
         # Format the custom prompt with company info
         custom_prompt = custom_prompt.format(
@@ -256,7 +261,7 @@ def send_reply(original_email, reply_content, folder_name):
         print(f"Warning: Could not save to folder '{folder_name}': {str(e)}")
 
 
-def process_new_emails(mailbox, folder_name, folder_state):
+def process_new_emails(mailbox, folder_name, folder_state, config_path):
     """Check for new emails and process them for a specific folder."""
     processed_count = 0
 
@@ -271,7 +276,7 @@ def process_new_emails(mailbox, folder_name, folder_state):
 
             try:
                 # Generate reply content using folder-specific configuration
-                reply_content = generate_reply_content(msg, folder_name)
+                reply_content = generate_reply_content(msg, folder_name, config_path)
 
                 # Send the reply with confirmation
                 confirm_and_send_reply(msg, reply_content, folder_name)
@@ -334,7 +339,7 @@ def main(config_path):
 
                         # Process new emails for this folder
                         processed = process_new_emails(
-                            mailbox, folder_name, state[folder_name]
+                            mailbox, folder_name, state[folder_name], config_path
                         )
                         total_processed += processed
 
