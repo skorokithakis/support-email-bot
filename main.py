@@ -26,6 +26,7 @@ def load_config(config_path="config.json"):
     with open(config_path, "r") as f:
         return json.load(f)
 
+
 # Initialize OpenAI client
 client = OpenAI()
 
@@ -111,6 +112,7 @@ Please write a helpful and professional response to this customer email. Make su
 5. Take the conversation history into account.
 6. Do not use em- or en-dashes. Use normal dashes.
 7. Don't sign emails.
+8. DO NOT assume things, and DO NOT say you have checked things you haven't. If you don't have access to check something, just don't assume or say anything about it. You MUST NEVER make implicit assumptions that might be wrong.
 """
 
         # Call OpenAI API
@@ -155,6 +157,33 @@ Best regards,
         }
 
 
+def confirm_and_send_reply(original_email, reply_content):
+    """Print the reply and ask for confirmation before sending."""
+    print("\n" + "=" * 60)
+    print("PROPOSED EMAIL RESPONSE:")
+    print("=" * 60)
+    print(f"To: {original_email.from_}")
+    print(f"From: {CONFIG['email']}")
+    print(f"Subject: {reply_content['subject']}")
+    print("-" * 60)
+    print("Body:")
+    print(reply_content["body"])
+    print("=" * 60)
+
+    # Ask for confirmation.
+    while True:
+        response = input("\nSend this email? (y/n): ").strip().lower()
+        if response == "y":
+            print("Sending...")
+            send_reply(original_email, reply_content)
+            return True
+        elif response == "n":
+            print("Email cancelled.")
+            return False
+        else:
+            print("Please enter 'y' or 'n'.")
+
+
 def send_reply(original_email, reply_content):
     """Send a reply to the original email with proper headers."""
     # Create message
@@ -175,12 +204,6 @@ def send_reply(original_email, reply_content):
         body.attach(MIMEText(reply_content["html"], "html"))
 
     msg.attach(body)
-
-    # Optional: Include original message as attachment
-    # Uncomment if you want to include the original message
-    # original_msg = MIMEMessage(original_email.obj)
-    # original_msg['Content-Disposition'] = 'attachment'
-    # msg.attach(original_msg)
 
     # Send email
     with smtplib.SMTP(CONFIG["smtp_server"], CONFIG["smtp_port"]) as server:
@@ -208,8 +231,8 @@ def process_new_emails(mailbox, folder_name, folder_state):
                 # Generate reply content using folder-specific configuration
                 reply_content = generate_reply_content(msg, folder_name)
 
-                # Send the reply
-                # send_reply(msg, reply_content)
+                # Send the reply with confirmation
+                confirm_and_send_reply(msg, reply_content)
 
                 # Mark as processed
                 folder_state["processed_uids"].append(msg.uid)

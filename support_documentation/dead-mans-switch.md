@@ -41,7 +41,12 @@ You'll get notifications on days 7, 10, 14, and 20 (not multiple on day 7 or 30)
 ### Interval rules
 - Numbers don't need to be sequential (e.g., "30,60,100" is valid)
 - Free accounts: Fixed at "1,2" (shown in dropdown, not changeable)
-- Premium accounts: Custom intervals via text field
+- Premium accounts: Either templated intervals (see below), or custom intervals via text field
+
+## UI
+
+There are some links at the top of each page: Home, Account, Log, Pricing (for free users) Help, and Sign out.
+"Home" is where the messages are listed. "Account" is the user's general account info (email, password, Telegram, web, subscription info, etc).
 
 ## Account types
 
@@ -63,6 +68,20 @@ You'll get notifications on days 7, 10, 14, and 20 (not multiple on day 7 or 30)
 - **Telegram**: Set up via Settings page
 - **Browser push notifications**: Set up via Settings page
 - **Android app**: Sends notifications and allows one-tap check-in (no iOS app available)
+
+### Available interval options
+Premium users can select from these preset intervals or create custom ones:
+
+- **Disabled** - Messages won't be sent
+- **Test message (1, 2)** - Notification on day 1, messages sent on day 2
+- **One week (4, 5, 7)** - Notifications on days 4 and 5, messages sent on day 7
+- **One month (15, 23, 30)** - Notifications on days 15 and 23, messages sent on day 30
+- **Two months (30, 45, 52, 60)** - Notifications on days 30, 45, and 52, messages sent on day 60
+- **Six months (30, 60, 90, 120, 150, 180)** - Notifications on days 30, 60, 90, 120, and 150, messages sent on day 180
+- **Custom intervals (specify below)** - Enter your own comma-separated numbers
+
+Free users can only see the first two ("disabled" and "test"), and are prompted to upgrade to see more.
+Custom users can either select an interval from the above, or select "custom intervals" and a textbox will appear. They can enter their intervals there.
 
 ### Default intervals (premium)
 The system suggests "30,45,52,60" by default, meaning:
