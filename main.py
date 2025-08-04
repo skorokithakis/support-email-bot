@@ -3,18 +3,21 @@
 IMAP Email Monitor and Auto-Reply Script with OpenAI Integration
 Monitors multiple folders for new emails and uses OpenAI to generate intelligent support responses.
 """
+
 import argparse
 import json
 import os
 import smtplib
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
 from imap_tools import AND
 from imap_tools import MailBox
 from openai import OpenAI
+
+UTC = timezone.utc
 
 
 # Load configuration from JSON file
@@ -157,7 +160,7 @@ Best regards,
         }
 
 
-def confirm_and_send_reply(original_email, reply_content):
+def confirm_and_send_reply(original_email, reply_content, folder_name):
     """Print the reply and ask for confirmation before sending."""
     print("\n" + "=" * 60)
     print("PROPOSED EMAIL RESPONSE:")
@@ -175,7 +178,7 @@ def confirm_and_send_reply(original_email, reply_content):
         response = input("\nSend this email? (y/n): ").strip().lower()
         if response == "y":
             print("Sending...")
-            send_reply(original_email, reply_content)
+            send_reply(original_email, reply_content, folder_name)
             return True
         elif response == "n":
             print("Email cancelled.")
@@ -184,7 +187,7 @@ def confirm_and_send_reply(original_email, reply_content):
             print("Please enter 'y' or 'n'.")
 
 
-def send_reply(original_email, reply_content):
+def send_reply(original_email, reply_content, folder_name):
     """Send a reply to the original email with proper headers."""
     # Create message
     msg = MIMEMultipart("mixed")
@@ -195,6 +198,8 @@ def send_reply(original_email, reply_content):
     msg["To"] = original_email.from_
     msg["In-Reply-To"] = original_email.headers.get("message-id", [""])[0]
     msg["References"] = original_email.headers.get("message-id", [""])[0]
+    msg["Date"] = datetime.now(UTC).strftime("%a, %d %b %Y %H:%M:%S +0000")
+    msg["Message-ID"] = f"<{datetime.now(UTC).timestamp()}.{CONFIG['email']}>"
 
     # Add body
     body = MIMEMultipart("alternative")
@@ -212,6 +217,35 @@ def send_reply(original_email, reply_content):
         server.send_message(msg)
 
     print(f"Reply sent to {original_email.from_} for: {original_email.subject}")
+
+    # Save to the same folder as the original message
+    try:
+        # Convert message to string for IMAP
+        msg_string = msg.as_string()
+
+        # Connect to IMAP to save the sent message
+        with MailBox(CONFIG["imap_server"]).login(
+            CONFIG["email"], CONFIG["password"]
+        ) as mailbox:
+            # Set the folder to the same as the original message
+            try:
+                mailbox.folder.set(folder_name)
+            except Exception as e:
+                print(f"Warning: Could not access folder '{folder_name}': {str(e)}")
+                return
+
+            # Append the message to the same folder as the original
+            # Use bytes and timezone-aware datetime to avoid compatibility issues
+            mailbox.append(
+                msg_string.encode(),
+                folder_name,
+                dt=datetime.now(UTC),
+                flag_set=["\\Seen"],
+            )
+            print(f"Reply saved to '{folder_name}' folder")
+
+    except Exception as e:
+        print(f"Warning: Could not save to folder '{folder_name}': {str(e)}")
 
 
 def process_new_emails(mailbox, folder_name, folder_state):
@@ -232,7 +266,7 @@ def process_new_emails(mailbox, folder_name, folder_state):
                 reply_content = generate_reply_content(msg, folder_name)
 
                 # Send the reply with confirmation
-                confirm_and_send_reply(msg, reply_content)
+                confirm_and_send_reply(msg, reply_content, folder_name)
 
                 # Mark as processed
                 folder_state["processed_uids"].append(msg.uid)
