@@ -437,6 +437,31 @@ def main(config_path: str, confirm: bool) -> None:
     )
     print("-" * 50)
 
+    # Print folder prompts configuration
+    print("\nFolder Prompts Configuration:")
+    print("=" * 50)
+    company_name = CONFIG.get("company_name", "Our Company")
+    support_email = CONFIG.get("support_email", "support@company.com")
+
+    for folder_name, folder_config in CONFIG["folders"].items():
+        print(f"\nFolder: {folder_name}")
+        print("-" * 30)
+
+        # Get and format the prompt
+        prompt_template = folder_config.get("prompt", "No prompt configured")
+        formatted_prompt = prompt_template.format(
+            company_name=company_name, support_email=support_email
+        )
+
+        print(f"Prompt: {formatted_prompt}")
+
+        # Show documentation file if configured
+        doc_file = folder_config.get("documentation_file")
+        if doc_file:
+            print(f"Documentation: {doc_file}")
+
+    print("\n" + "=" * 50)
+
     # Test OpenAI connection
     try:
         client.models.retrieve(CONFIG["model"])
