@@ -344,6 +344,10 @@ def process_new_emails(
         if msg.uid in folder_state["processed_uids"]:
             continue
 
+        # Skip emails sent by the bot itself
+        if msg.from_ == CONFIG["email"]:
+            continue
+
         # Check retry count
         retry_count = folder_state["retry_counts"].get(uid_str, 0)
 
