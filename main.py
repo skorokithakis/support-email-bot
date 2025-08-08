@@ -413,7 +413,7 @@ def process_new_emails(
     return processed_count
 
 
-def main(config_path: str, confirm: bool) -> None:
+def main(config_path: str, confirm: bool, once: bool = False) -> None:
     """Main monitoring loop."""
     global client
 
@@ -520,6 +520,10 @@ def main(config_path: str, confirm: bool) -> None:
             print(f"\nError: {str(e)}")
             print("Will retry in next interval...")
 
+        # If running once, break after first iteration
+        if once:
+            break
+
         # Wait before next check
         time.sleep(CONFIG["check_interval"])
 
@@ -540,13 +544,18 @@ if __name__ == "__main__":
         action="store_true",
         help="Ask for confirmation before sending each email (default: send without confirmation)",
     )
+    parser.add_argument(
+        "--once",
+        action="store_true",
+        help="Run one cycle of the monitoring loop and then exit (default: run continuously)",
+    )
     args = parser.parse_args()
 
     # Load configuration with specified path
     CONFIG = load_config(args.config)
 
     try:
-        main(args.config, args.confirm)
+        main(args.config, args.confirm, args.once)
     except KeyboardInterrupt:
         print("\n\nMonitoring stopped by user.")
     except Exception as e:
