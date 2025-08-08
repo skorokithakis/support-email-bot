@@ -511,10 +511,6 @@ def main(config_path: str, confirm: bool, once: bool = False) -> None:
                     print(
                         f"\nTotal: Processed {total_processed} new email(s) across all folders"
                     )
-                else:
-                    print(
-                        f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] No new emails in any folder"
-                    )
 
         except Exception as e:
             print(f"\nError: {str(e)}")
