@@ -331,6 +331,7 @@ def process_new_emails(
     folder_state: dict[str, Any],
     config_path: str,
     confirm: bool,
+    debug: bool,
 ) -> int:
     """Check for new emails and process them for a specific folder."""
     processed_count = 0
@@ -339,30 +340,92 @@ def process_new_emails(
     # Fetch all emails once to avoid multiple IMAP fetches.
     all_emails = list(mailbox.fetch(AND(all=True)))
 
+    if debug:
+        print(f"[debug] Fetched {len(all_emails)} messages in '{folder_name}'")
+
     # Build a set of message IDs that have already been replied to by the bot's
     # address. This catches both auto-replies and manual replies from the same
     # account.
     replied_to_ids = set()
+    replied_to_map: dict[str, list[tuple[str, str]]] = {}
     for msg in all_emails:
+        if debug:
+            msg_id = msg.headers.get("message-id", [""])[0].strip()
+            in_reply_to = msg.headers.get("in-reply-to", [""])[0].strip()
+            print(
+                "[debug] Message: "
+                f"uid={msg.uid} "
+                f"message-id={msg_id or '<missing>'} "
+                f"in-reply-to={in_reply_to or '<none>'} "
+                f"from={msg.from_ or '<missing>'} "
+                f"subject={msg.subject or '<no subject>'}"
+            )
         if msg.from_ == CONFIG["email"]:
             in_reply_to = msg.headers.get("in-reply-to", [""])[0]
             if in_reply_to:
-                replied_to_ids.add(in_reply_to.strip())
+                in_reply_to = in_reply_to.strip()
+                replied_to_ids.add(in_reply_to)
+                reply_msg_id = msg.headers.get("message-id", [""])[0].strip()
+                replied_to_map.setdefault(in_reply_to, []).append(
+                    (reply_msg_id, msg.subject or "")
+                )
+                if debug:
+                    print(
+                        "[debug] Reply seen: "
+                        f"message-id={reply_msg_id or '<missing>'} "
+                        f"in-reply-to={in_reply_to} "
+                        f"subject={msg.subject or '<no subject>'}"
+                    )
 
     for msg in all_emails:
         uid_str = str(msg.uid)  # Convert to string for JSON serialization
 
         # Check if we've already successfully processed this email
         if msg.uid in folder_state["processed_uids"]:
+            if debug:
+                msg_id = msg.headers.get("message-id", [""])[0].strip()
+                print(
+                    "[debug] Already processed (state): "
+                    f"uid={msg.uid} message-id={msg_id or '<missing>'}"
+                )
             continue
 
         # Skip emails sent by the bot itself
         if msg.from_ == CONFIG["email"]:
+            if debug:
+                msg_id = msg.headers.get("message-id", [""])[0].strip()
+                print(
+                    "[debug] Skipping bot-sent message: "
+                    f"uid={msg.uid} message-id={msg_id or '<missing>'}"
+                )
             continue
 
-        # Skip emails that already have a reply from the bot's address.
         msg_id = msg.headers.get("message-id", [""])[0]
+        if debug:
+            print(
+                "[debug] Inspecting: "
+                f"uid={msg.uid} "
+                f"message-id={msg_id or '<missing>'} "
+                f"subject={msg.subject or '<no subject>'}"
+            )
+
+        # Skip emails that already have a reply from the bot's address.
         if msg_id and msg_id in replied_to_ids:
+            if debug:
+                replies = replied_to_map.get(msg_id, [])
+                reply_details = ", ".join(
+                    f"{reply_id or '<missing>'} ({reply_subject or '<no subject>'})"
+                    for reply_id, reply_subject in replies
+                )
+                print(
+                    "[debug] Skipping replied-to message: "
+                    f"message-id={msg_id} "
+                    f"replies=[{reply_details or 'none'}]"
+                )
+                print(
+                    "[debug] Marking processed in state: "
+                    f"uid={msg.uid} message-id={msg_id or '<missing>'}"
+                )
             folder_state["processed_uids"].append(msg.uid)
             continue
 
@@ -372,6 +435,14 @@ def process_new_emails(
         # Skip if we've exceeded max retries
         if retry_count >= max_retries:
             continue
+
+        if debug:
+            print(
+                "[debug] Processing: "
+                f"uid={msg.uid} "
+                f"message-id={msg_id or '<missing>'} "
+                f"subject={msg.subject or '<no subject>'}"
+            )
 
         print(f"\nEmail detected in '{folder_name}':")
         print(f"  From: {msg.from_}")
@@ -389,6 +460,11 @@ def process_new_emails(
 
             # Mark as successfully processed
             folder_state["processed_uids"].append(msg.uid)
+            if debug:
+                print(
+                    "[debug] Added to processed_uids: "
+                    f"uid={msg.uid} message-id={msg_id or '<missing>'}"
+                )
             # Remove from retry counts if it was there
             if uid_str in folder_state["retry_counts"]:
                 del folder_state["retry_counts"][uid_str]
@@ -431,7 +507,7 @@ def process_new_emails(
     return processed_count
 
 
-def main(config_path: str, confirm: bool, once: bool = False) -> None:
+def main(config_path: str, confirm: bool, once: bool = False, debug: bool = False) -> None:
     """Main monitoring loop."""
     global client
 
@@ -453,6 +529,8 @@ def main(config_path: str, confirm: bool, once: bool = False) -> None:
     print(
         f"Email mode: {'SENDING EMAILS' if CONFIG.get('send_emails', False) else 'DRY RUN (not sending emails)'}"
     )
+    if debug:
+        print("Debug logging: enabled")
     print("-" * 50)
 
     # Print folder prompts configuration
@@ -512,6 +590,7 @@ def main(config_path: str, confirm: bool, once: bool = False) -> None:
                             state[folder_name],
                             config_path,
                             confirm,
+                            debug,
                         )
                         total_processed += processed
 
@@ -563,13 +642,18 @@ if __name__ == "__main__":
         action="store_true",
         help="Run one cycle of the monitoring loop and then exit (default: run continuously)",
     )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Enable debug logging of message IDs and reply relationships",
+    )
     args = parser.parse_args()
 
     # Load configuration with specified path
     CONFIG = load_config(args.config)
 
     try:
-        main(args.config, args.confirm, args.once)
+        main(args.config, args.confirm, args.once, args.debug)
     except KeyboardInterrupt:
         print("\n\nMonitoring stopped by user.")
     except Exception as e:
