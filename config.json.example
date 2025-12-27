@@ -12,6 +12,8 @@
   "company_name": "Your Company",
   "support_email": "support@company.com",
   "send_emails": true,
+  "sent_folder": "Sent",
+  "sent_lookback_days": 2,
   "folders": {
     "INBOX": {
       "documentation_file": "support_documentation/general.md",

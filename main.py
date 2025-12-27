@@ -9,7 +9,7 @@ import json
 import os
 import smtplib
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from typing import Any, Optional
@@ -52,8 +52,8 @@ def load_documentation(file_path: str, config_path: str) -> str:
         return "Documentation file not found."
 
 
-def load_state(config_path: str) -> dict[str, dict[str, Any]]:
-    """Load the state file containing processed email UIDs per folder."""
+def load_state(config_path: str) -> dict[str, Any]:
+    """Load the state file containing processed email UIDs and reply history."""
     # Make state file path relative to config file directory
     config_dir = os.path.dirname(os.path.abspath(config_path))
     state_file_path = os.path.join(config_dir, CONFIG["state_file"])
@@ -61,6 +61,12 @@ def load_state(config_path: str) -> dict[str, dict[str, Any]]:
     if os.path.exists(state_file_path):
         with open(state_file_path, "r") as f:
             state = json.load(f)
+            # Ensure global replied-to tracking exists.
+            if "replied_to_ids" not in state or not isinstance(
+                state["replied_to_ids"], list
+            ):
+                state["replied_to_ids"] = []
+
             # Ensure each folder has an entry with all required fields
             for folder in CONFIG["folders"]:
                 if folder not in state:
@@ -78,13 +84,16 @@ def load_state(config_path: str) -> dict[str, dict[str, Any]]:
             return state
     # Initialize state for all folders with all required fields
     return {
-        folder: {"processed_uids": [], "failed_emails": [], "retry_counts": {}}
-        for folder in CONFIG["folders"]
+        "replied_to_ids": [],
+        **{
+            folder: {"processed_uids": [], "failed_emails": [], "retry_counts": {}}
+            for folder in CONFIG["folders"]
+        },
     }
 
 
-def save_state(state: dict[str, dict[str, Any]], config_path: str) -> None:
-    """Save the state file with processed email UIDs per folder."""
+def save_state(state: dict[str, Any], config_path: str) -> None:
+    """Save the state file with processed email UIDs and reply history."""
     # Make state file path relative to config file directory
     config_dir = os.path.dirname(os.path.abspath(config_path))
     state_file_path = os.path.join(config_dir, CONFIG["state_file"])
@@ -329,26 +338,82 @@ def process_new_emails(
     mailbox: MailBox,
     folder_name: str,
     folder_state: dict[str, Any],
+    replied_to_state: list[str],
     config_path: str,
     confirm: bool,
     debug: bool,
-) -> int:
+) -> tuple[int, bool]:
     """Check for new emails and process them for a specific folder."""
     processed_count = 0
+    state_changed = False
     max_retries = 3  # Total of 3 attempts (initial + 2 retries)
 
     # Fetch all emails once to avoid multiple IMAP fetches.
+    if debug:
+        print(f"[debug] Fetching all messages in '{folder_name}'...")
     all_emails = list(mailbox.fetch(AND(all=True)))
+    sent_emails: list[MailMessage] = []
+    sent_folders: list[str] = []
+    sent_folder_value = CONFIG.get("sent_folders", CONFIG.get("sent_folder"))
+    if isinstance(sent_folder_value, str):
+        sent_folders = [sent_folder_value]
+    elif isinstance(sent_folder_value, list):
+        sent_folders = [f for f in sent_folder_value if isinstance(f, str)]
+    sent_lookback_days = CONFIG.get("sent_lookback_days", 2)
+    sent_since_date = None
+    try:
+        sent_lookback_days_int = int(sent_lookback_days)
+        if sent_lookback_days_int > 0:
+            sent_since_date = (datetime.now(UTC) - timedelta(days=sent_lookback_days_int)).date()
+    except (TypeError, ValueError):
+        sent_since_date = None
+
+    if sent_folders:
+        if debug and sent_since_date:
+            print(
+                "[debug] Sent lookback: "
+                f"{sent_lookback_days} day(s) since {sent_since_date.isoformat()}"
+            )
+        for sent_folder in sent_folders:
+            if sent_folder == folder_name:
+                continue
+            try:
+                if debug:
+                    print(f"[debug] Fetching all messages in sent folder '{sent_folder}'...")
+                mailbox.folder.set(sent_folder)
+                if sent_since_date:
+                    fetched = list(mailbox.fetch(AND(all=True, sent_date_gte=sent_since_date)))
+                else:
+                    fetched = list(mailbox.fetch(AND(all=True)))
+                sent_emails.extend(fetched)
+                if debug:
+                    print(
+                        "[debug] Fetched "
+                        f"{len(fetched)} message(s) from sent folder '{sent_folder}'"
+                    )
+            except Exception as e:
+                if debug:
+                    print(
+                        "[debug] Could not fetch sent folder "
+                        f"'{sent_folder}': {str(e)}"
+                    )
+        try:
+            mailbox.folder.set(folder_name)
+        except Exception:
+            pass
 
     if debug:
-        print(f"[debug] Fetched {len(all_emails)} messages in '{folder_name}'")
+        print(
+            f"[debug] Fetched {len(all_emails)} message(s) in '{folder_name}'"
+        )
 
     # Build a set of message IDs that have already been replied to by the bot's
     # address. This catches both auto-replies and manual replies from the same
     # account.
-    replied_to_ids = set()
+    replied_to_ids = set(replied_to_state)
+    new_replied_to_ids: set[str] = set()
     replied_to_map: dict[str, list[tuple[str, str]]] = {}
-    for msg in all_emails:
+    for msg in all_emails + sent_emails:
         if debug:
             msg_id = msg.headers.get("message-id", [""])[0].strip()
             in_reply_to = msg.headers.get("in-reply-to", [""])[0].strip()
@@ -364,6 +429,8 @@ def process_new_emails(
             in_reply_to = msg.headers.get("in-reply-to", [""])[0]
             if in_reply_to:
                 in_reply_to = in_reply_to.strip()
+                if in_reply_to not in replied_to_ids:
+                    new_replied_to_ids.add(in_reply_to)
                 replied_to_ids.add(in_reply_to)
                 reply_msg_id = msg.headers.get("message-id", [""])[0].strip()
                 replied_to_map.setdefault(in_reply_to, []).append(
@@ -376,6 +443,10 @@ def process_new_emails(
                         f"in-reply-to={in_reply_to} "
                         f"subject={msg.subject or '<no subject>'}"
                     )
+
+    if new_replied_to_ids:
+        replied_to_state.extend(sorted(new_replied_to_ids))
+        state_changed = True
 
     for msg in all_emails:
         uid_str = str(msg.uid)  # Convert to string for JSON serialization
@@ -427,6 +498,7 @@ def process_new_emails(
                     f"uid={msg.uid} message-id={msg_id or '<missing>'}"
                 )
             folder_state["processed_uids"].append(msg.uid)
+            processed_count += 1
             continue
 
         # Check retry count
@@ -504,7 +576,10 @@ def process_new_emails(
                 remaining_retries = max_retries - folder_state["retry_counts"][uid_str]
                 print(f"  Will retry {remaining_retries} more time(s) in future runs.")
 
-    return processed_count
+    if processed_count > 0:
+        state_changed = True
+
+    return processed_count, state_changed
 
 
 def main(config_path: str, confirm: bool, once: bool = False, debug: bool = False) -> None:
@@ -576,6 +651,7 @@ def main(config_path: str, confirm: bool, once: bool = False, debug: bool = Fals
                 CONFIG["email"], CONFIG["password"]
             ) as mailbox:
                 total_processed = 0
+                any_state_changed = False
 
                 # Process each configured folder
                 for folder_name in CONFIG["folders"]:
@@ -584,15 +660,17 @@ def main(config_path: str, confirm: bool, once: bool = False, debug: bool = Fals
                         mailbox.folder.set(folder_name)
 
                         # Process new emails for this folder
-                        processed = process_new_emails(
+                        processed, state_changed = process_new_emails(
                             mailbox,
                             folder_name,
                             state[folder_name],
+                            state["replied_to_ids"],
                             config_path,
                             confirm,
                             debug,
                         )
                         total_processed += processed
+                        any_state_changed = any_state_changed or state_changed
 
                         if processed > 0:
                             print(
@@ -603,8 +681,9 @@ def main(config_path: str, confirm: bool, once: bool = False, debug: bool = Fals
                         print(f"\nError processing folder '{folder_name}': {str(e)}")
                         continue
 
-                if total_processed > 0:
+                if any_state_changed:
                     save_state(state, config_path)
+                if total_processed > 0:
                     print(
                         f"\nTotal: Processed {total_processed} new email(s) across all folders"
                     )
