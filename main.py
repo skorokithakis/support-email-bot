@@ -336,8 +336,20 @@ def process_new_emails(
     processed_count = 0
     max_retries = 3  # Total of 3 attempts (initial + 2 retries)
 
-    # Fetch all emails in the monitored folder
-    for msg in mailbox.fetch(AND(all=True)):
+    # Fetch all emails once to avoid multiple IMAP fetches.
+    all_emails = list(mailbox.fetch(AND(all=True)))
+
+    # Build a set of message IDs that have already been replied to by the bot's
+    # address. This catches both auto-replies and manual replies from the same
+    # account.
+    replied_to_ids = set()
+    for msg in all_emails:
+        if msg.from_ == CONFIG["email"]:
+            in_reply_to = msg.headers.get("in-reply-to", [""])[0]
+            if in_reply_to:
+                replied_to_ids.add(in_reply_to.strip())
+
+    for msg in all_emails:
         uid_str = str(msg.uid)  # Convert to string for JSON serialization
 
         # Check if we've already successfully processed this email
@@ -346,6 +358,12 @@ def process_new_emails(
 
         # Skip emails sent by the bot itself
         if msg.from_ == CONFIG["email"]:
+            continue
+
+        # Skip emails that already have a reply from the bot's address.
+        msg_id = msg.headers.get("message-id", [""])[0]
+        if msg_id and msg_id in replied_to_ids:
+            folder_state["processed_uids"].append(msg.uid)
             continue
 
         # Check retry count
