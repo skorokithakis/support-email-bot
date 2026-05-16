@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-IMAP Email Monitor and Auto-Reply Script with OpenAI Integration
-Monitors multiple folders for new emails and uses OpenAI to generate intelligent support responses.
+IMAP Email Monitor and Auto-Reply Script with LLM Integration
+Monitors multiple folders for new emails and uses an LLM to generate intelligent support responses.
 """
 
 import argparse
@@ -17,7 +17,7 @@ from typing import Any, Optional
 from imap_tools import AND
 from imap_tools import MailBox
 from imap_tools import MailMessage
-from openai import OpenAI
+import litellm
 
 UTC = timezone.utc
 
@@ -33,10 +33,6 @@ def load_config(config_path: str = "config.json") -> dict[str, Any]:
 
     with open(config_path, "r") as f:
         return json.load(f)
-
-
-# Initialize OpenAI client (will be set after loading config)
-client: Optional[OpenAI] = None
 
 
 def load_documentation(file_path: str, config_path: str) -> str:
@@ -106,7 +102,7 @@ def generate_reply_content(
     original_email: MailMessage, folder_name: str, config_path: str
 ) -> dict[str, Optional[str]]:
     """
-    Use OpenAI to generate an intelligent support response.
+    Use an LLM to generate an intelligent support response.
 
     Args:
         original_email: MailMessage object from imap_tools
@@ -160,18 +156,38 @@ Please write a helpful and professional response to this customer email. Make su
 8. DO NOT assume things, and DO NOT say you have checked things you haven't. If you don't have access to check something, just don't assume or say anything about it. You MUST NEVER make implicit assumptions that might be wrong.
 """
 
-        # Call OpenAI API
-        assert client is not None, "OpenAI client not initialized"
-        response = client.chat.completions.create(
-            model=CONFIG["model"],
-            messages=[
+        # Call LiteLLM API
+        kwargs: dict[str, Any] = {
+            "model": CONFIG["model"],
+            "messages": [
                 {
                     "role": "system",
                     "content": "You are a helpful customer support agent. Always be professional, empathetic, and solution-oriented.",
                 },
                 {"role": "user", "content": prompt},
             ],
-        )
+        }
+
+        # api_key: env takes precedence over config; treat empty string as not set
+        api_key = os.environ.get("LLM_API_KEY")
+        if not api_key:
+            api_key = CONFIG.get("llm_api_key")
+        if api_key:
+            kwargs["api_key"] = api_key
+
+        # api_base: env takes precedence over config; treat empty string as not set
+        api_base = os.environ.get("LLM_BASE_URL")
+        if not api_base:
+            api_base = CONFIG.get("llm_base_url")
+        if api_base:
+            kwargs["api_base"] = api_base
+
+        # reasoning_effort: from config only
+        reasoning_effort = CONFIG.get("reasoning_effort")
+        if reasoning_effort:
+            kwargs["reasoning_effort"] = reasoning_effort
+
+        response = litellm.completion(**kwargs)
 
         # Extract the generated response
         reply_body = response.choices[0].message.content
@@ -364,7 +380,9 @@ def process_new_emails(
     try:
         sent_lookback_days_int = int(sent_lookback_days)
         if sent_lookback_days_int > 0:
-            sent_since_date = (datetime.now(UTC) - timedelta(days=sent_lookback_days_int)).date()
+            sent_since_date = (
+                datetime.now(UTC) - timedelta(days=sent_lookback_days_int)
+            ).date()
     except (TypeError, ValueError):
         sent_since_date = None
 
@@ -379,10 +397,14 @@ def process_new_emails(
                 continue
             try:
                 if debug:
-                    print(f"[debug] Fetching all messages in sent folder '{sent_folder}'...")
+                    print(
+                        f"[debug] Fetching all messages in sent folder '{sent_folder}'..."
+                    )
                 mailbox.folder.set(sent_folder)
                 if sent_since_date:
-                    fetched = list(mailbox.fetch(AND(all=True, sent_date_gte=sent_since_date)))
+                    fetched = list(
+                        mailbox.fetch(AND(all=True, sent_date_gte=sent_since_date))
+                    )
                 else:
                     fetched = list(mailbox.fetch(AND(all=True)))
                 sent_emails.extend(fetched)
@@ -394,8 +416,7 @@ def process_new_emails(
             except Exception as e:
                 if debug:
                     print(
-                        "[debug] Could not fetch sent folder "
-                        f"'{sent_folder}': {str(e)}"
+                        f"[debug] Could not fetch sent folder '{sent_folder}': {str(e)}"
                     )
         try:
             mailbox.folder.set(folder_name)
@@ -403,9 +424,7 @@ def process_new_emails(
             pass
 
     if debug:
-        print(
-            f"[debug] Fetched {len(all_emails)} message(s) in '{folder_name}'"
-        )
+        print(f"[debug] Fetched {len(all_emails)} message(s) in '{folder_name}'")
 
     # Build a set of message IDs that have already been replied to by the bot's
     # address. This catches both auto-replies and manual replies from the same
@@ -582,17 +601,10 @@ def process_new_emails(
     return processed_count, state_changed
 
 
-def main(config_path: str, confirm: bool, once: bool = False, debug: bool = False) -> None:
+def main(
+    config_path: str, confirm: bool, once: bool = False, debug: bool = False
+) -> None:
     """Main monitoring loop."""
-    global client
-
-    # Initialize OpenAI client with API key from config
-    if "openai_api_key" not in CONFIG:
-        print("Error: 'openai_api_key' not found in configuration file")
-        print("Please add your OpenAI API key to the config file")
-        return
-
-    client = OpenAI(api_key=CONFIG["openai_api_key"])
 
     print("Starting AI-powered email support monitor...")
     print(f"Server: {CONFIG['imap_server']}")
@@ -600,6 +612,17 @@ def main(config_path: str, confirm: bool, once: bool = False, debug: bool = Fals
     print(f"Monitoring folders: {', '.join(CONFIG['folders'].keys())}")
     print(f"Check interval: {CONFIG['check_interval']} seconds")
     print(f"AI Model: {CONFIG['model']}")
+
+    # Reasoning effort
+    reasoning_effort = CONFIG.get("reasoning_effort")
+    if reasoning_effort:
+        print(f"Reasoning effort: {reasoning_effort}")
+
+    # LLM base URL override (from env or config)
+    llm_base_url = os.environ.get("LLM_BASE_URL") or CONFIG.get("llm_base_url")
+    if llm_base_url:
+        print(f"LLM base URL: {llm_base_url}")
+
     print(f"Company: {CONFIG.get('company_name', 'Not specified')}")
     print(
         f"Email mode: {'SENDING EMAILS' if CONFIG.get('send_emails', False) else 'DRY RUN (not sending emails)'}"
@@ -632,15 +655,6 @@ def main(config_path: str, confirm: bool, once: bool = False, debug: bool = Fals
             print(f"Documentation: {doc_file}")
 
     print("\n" + "=" * 50)
-
-    # Test OpenAI connection
-    try:
-        client.models.retrieve(CONFIG["model"])
-        print("✓ OpenAI API connection successful")
-    except Exception as e:
-        print(f"✗ OpenAI API error: {str(e)}")
-        print("Please check your API key and model name")
-        return
 
     state = load_state(config_path)
 
@@ -703,7 +717,7 @@ def main(config_path: str, confirm: bool, once: bool = False, debug: bool = Fals
 if __name__ == "__main__":
     # Parse command-line arguments
     parser = argparse.ArgumentParser(
-        description="IMAP Email Monitor and Auto-Reply Script with OpenAI Integration"
+        description="IMAP Email Monitor and Auto-Reply Script with LLM Integration"
     )
     parser.add_argument(
         "-c",
