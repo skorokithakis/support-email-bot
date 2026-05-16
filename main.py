@@ -168,24 +168,20 @@ Please write a helpful and professional response to this customer email. Make su
             ],
         }
 
-        # api_key: env takes precedence over config; treat empty string as not set
-        api_key = os.environ.get("LLM_API_KEY")
-        if not api_key:
-            api_key = CONFIG.get("llm_api_key")
+        # api_key: config only; treat empty string as not set
+        api_key = CONFIG.get("llm_api_key")
         if api_key:
             kwargs["api_key"] = api_key
 
-        # api_base: env takes precedence over config; treat empty string as not set
-        api_base = os.environ.get("LLM_BASE_URL")
-        if not api_base:
-            api_base = CONFIG.get("llm_base_url")
+        # api_base: config only; treat empty string as not set
+        api_base = CONFIG.get("llm_base_url")
         if api_base:
             kwargs["api_base"] = api_base
 
-        # reasoning_effort: from config only
-        reasoning_effort = CONFIG.get("reasoning_effort")
-        if reasoning_effort:
-            kwargs["reasoning_effort"] = reasoning_effort
+        # reasoning_effort: config with default of "medium", omit if falsy
+        effort = CONFIG.get("reasoning_effort", "medium")
+        if effort:
+            kwargs["reasoning_effort"] = effort
 
         response = litellm.completion(**kwargs)
 
@@ -613,13 +609,12 @@ def main(
     print(f"Check interval: {CONFIG['check_interval']} seconds")
     print(f"AI Model: {CONFIG['model']}")
 
-    # Reasoning effort
-    reasoning_effort = CONFIG.get("reasoning_effort")
-    if reasoning_effort:
-        print(f"Reasoning effort: {reasoning_effort}")
+    # Reasoning effort (defaults to "medium" if omitted; null/None disables)
+    reasoning_effort = CONFIG.get("reasoning_effort", "medium")
+    print(f"Reasoning effort: {reasoning_effort}")
 
-    # LLM base URL override (from env or config)
-    llm_base_url = os.environ.get("LLM_BASE_URL") or CONFIG.get("llm_base_url")
+    # LLM base URL override (config only)
+    llm_base_url = CONFIG.get("llm_base_url")
     if llm_base_url:
         print(f"LLM base URL: {llm_base_url}")
 

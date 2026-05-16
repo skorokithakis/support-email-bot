@@ -19,7 +19,7 @@ An automated email support system that monitors IMAP folders and uses AI to gene
 
 2. Configure the bot by editing `config.json`:
    - Email server settings (IMAP/SMTP)
-   - LLM API credentials (`llm_api_key`, or set the `LLM_API_KEY` environment variable which takes precedence)
+   - LLM API credentials (`llm_api_key`)
    - Folders to monitor with their documentation files
    - Company information
 
@@ -45,9 +45,9 @@ The `config.json` file controls:
 
 ### LLM settings
 - `model`: A LiteLLM model string (e.g. `anthropic/claude-opus-4-6`). Supports any provider LiteLLM supports.
-- `llm_api_key`: API key for the LLM provider. Can also be set via the `LLM_API_KEY` environment variable (takes precedence over the config file value).
-- `llm_base_url` (optional): Custom base URL for the LLM API. Can also be set via the `LLM_BASE_URL` environment variable (takes precedence). Leave empty or omit to use the provider's default. Useful for pointing at a self-hosted or proxy upstream.
-- `reasoning_effort` (optional): Accepts `"low"`, `"medium"`, or `"high"`. Omit to disable adaptive thinking / extended reasoning.
+- `llm_api_key`: API key for the LLM provider (config key only; no environment variable support).
+- `llm_base_url` (optional): Custom base URL for the LLM API. Leave empty or omit to use the provider's default. Useful for pointing at a self-hosted or proxy upstream.
+- `reasoning_effort` (optional): Accepts `"low"`, `"medium"`, or `"high"`. Defaults to `"medium"` if omitted. Set to `null` to disable adaptive thinking / extended reasoning.
 
 ### Other settings
 - `company_name` / `support_email`: Used in response templates.
