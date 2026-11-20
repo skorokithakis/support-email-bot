@@ -8,7 +8,6 @@ import argparse
 import json
 import os
 import smtplib
-import sys
 import time
 import urllib.error
 import urllib.request
@@ -101,15 +100,15 @@ def save_state(state: dict[str, Any], config_path: str) -> None:
         json.dump(state, f, indent=2)
 
 
-def send_notification(body: str, title: str = "Support bot error") -> bool:
-    """Send a push notification via ntfy. Return True on success, False otherwise.
+def send_notification(body: str, title: str = "Support bot error") -> None:
+    """Send a push notification via ntfy. Does nothing if ntfy_url is not set.
 
     Failures are caught and logged here so a notification problem can never
     affect monitoring or retry behavior.
     """
     ntfy_url = CONFIG.get("ntfy_url")
     if not ntfy_url:
-        return False
+        return
 
     try:
         request = urllib.request.Request(
@@ -127,8 +126,6 @@ def send_notification(body: str, title: str = "Support bot error") -> bool:
         if isinstance(e, urllib.error.HTTPError):
             detail += f" (HTTP {e.code})"
         print(f"Warning: could not send notification: {detail}")
-        return False
-    return True
 
 
 def generate_reply_content(
@@ -680,6 +677,11 @@ def main(
 
     state = load_state(config_path)
 
+    # Lets the owner see that the notification channel works. Sent after the
+    # config and state have loaded, so a fatal startup error exits before this
+    # point and a restart loop does not send one message per restart.
+    send_notification("Support bot started.", "Support bot started")
+
     previous_cycle_failed = False
     while True:
         cycle_errors: list[str] = []
@@ -774,27 +776,10 @@ if __name__ == "__main__":
         action="store_true",
         help="Enable debug logging of message IDs and reply relationships",
     )
-    parser.add_argument(
-        "--test-notification",
-        action="store_true",
-        help="Send one test notification using ntfy_url and exit",
-    )
     args = parser.parse_args()
 
     # Load configuration with specified path
     CONFIG = load_config(args.config)
-
-    if args.test_notification:
-        if not CONFIG.get("ntfy_url"):
-            print("Error: ntfy_url is not configured; cannot send test notification.")
-            sys.exit(1)
-        if send_notification(
-            "Test notification from the support bot.", "Support bot test"
-        ):
-            print("Test notification sent.")
-            sys.exit(0)
-        print("Error: test notification failed; see the warning above.")
-        sys.exit(1)
 
     try:
         main(args.config, args.confirm, args.once, args.debug)
