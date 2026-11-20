@@ -112,25 +112,24 @@ def generate_reply_content(
     Returns:
         dict with 'subject', 'body', and optionally 'html' keys
     """
-    try:
-        # Get folder-specific configuration
-        folder_config = CONFIG["folders"].get(folder_name, {})
-        documentation_file = folder_config.get("documentation_file")
-        custom_prompt = folder_config.get("prompt", "")
+    # Get folder-specific configuration
+    folder_config = CONFIG["folders"].get(folder_name, {})
+    documentation_file = folder_config.get("documentation_file")
+    custom_prompt = folder_config.get("prompt", "")
 
-        # Load documentation if available
-        documentation = ""
-        if documentation_file:
-            documentation = load_documentation(documentation_file, config_path)
+    # Load documentation if available
+    documentation = ""
+    if documentation_file:
+        documentation = load_documentation(documentation_file, config_path)
 
-        # Format the custom prompt with company info
-        custom_prompt = custom_prompt.format(
-            company_name=CONFIG.get("company_name", "Our Company"),
-            support_email=CONFIG.get("support_email", "support@company.com"),
-        )
+    # Format the custom prompt with company info
+    custom_prompt = custom_prompt.format(
+        company_name=CONFIG.get("company_name", "Our Company"),
+        support_email=CONFIG.get("support_email", "support@company.com"),
+    )
 
-        # Create the prompt for the LLM
-        prompt = f"""
+    # Create the prompt for the LLM
+    prompt = f"""
 {custom_prompt}
 
 Documentation:
@@ -156,63 +155,43 @@ Please write a helpful and professional response to this customer email. Make su
 8. DO NOT assume things, and DO NOT say you have checked things you haven't. If you don't have access to check something, just don't assume or say anything about it. You MUST NEVER make implicit assumptions that might be wrong.
 """
 
-        # Call LiteLLM API
-        kwargs: dict[str, Any] = {
-            "model": CONFIG["model"],
-            "messages": [
-                {
-                    "role": "system",
-                    "content": "You are a helpful customer support agent. Always be professional, empathetic, and solution-oriented.",
-                },
-                {"role": "user", "content": prompt},
-            ],
-        }
+    # Call LiteLLM API
+    kwargs: dict[str, Any] = {
+        "model": CONFIG["model"],
+        "messages": [
+            {
+                "role": "system",
+                "content": "You are a helpful customer support agent. Always be professional, empathetic, and solution-oriented.",
+            },
+            {"role": "user", "content": prompt},
+        ],
+    }
 
-        # api_key: config only; treat empty string as not set
-        api_key = CONFIG.get("llm_api_key")
-        if api_key:
-            kwargs["api_key"] = api_key
+    # api_key: config only; treat empty string as not set
+    api_key = CONFIG.get("llm_api_key")
+    if api_key:
+        kwargs["api_key"] = api_key
 
-        # api_base: config only; treat empty string as not set
-        api_base = CONFIG.get("llm_base_url")
-        if api_base:
-            kwargs["api_base"] = api_base
+    # api_base: config only; treat empty string as not set
+    api_base = CONFIG.get("llm_base_url")
+    if api_base:
+        kwargs["api_base"] = api_base
 
-        # reasoning_effort: config with default of "medium", omit if falsy
-        effort = CONFIG.get("reasoning_effort", "medium")
-        if effort:
-            kwargs["reasoning_effort"] = effort
+    # reasoning_effort: config with default of "medium", omit if falsy
+    effort = CONFIG.get("reasoning_effort", "medium")
+    if effort:
+        kwargs["reasoning_effort"] = effort
 
-        response = litellm.completion(**kwargs)
+    response = litellm.completion(**kwargs)
 
-        # Extract the generated response
-        reply_body = response.choices[0].message.content
+    # Extract the generated response
+    reply_body = response.choices[0].message.content
 
-        return {
-            "subject": f"Re: {original_email.subject}",
-            "body": reply_body,
-            "html": None,  # You could convert to HTML if needed
-        }
-
-    except Exception as e:
-        print(f"Error generating AI response: {str(e)}")
-        # Fallback to a generic response if AI fails
-        return {
-            "subject": f"Re: {original_email.subject}",
-            "body": f"""Dear {original_email.from_},
-
-Thank you for contacting {CONFIG.get("company_name", "Our Company")} support.
-
-We have received your email and are currently experiencing technical difficulties with our automated response system.
-A human support agent will review your message and respond within 24 hours.
-
-We apologize for any inconvenience.
-
-Best regards,
-{CONFIG.get("company_name", "Our Company")} Support Team
-{CONFIG.get("support_email", "support@company.com")}""",
-            "html": None,
-        }
+    return {
+        "subject": f"Re: {original_email.subject}",
+        "body": reply_body,
+        "html": None,  # You could convert to HTML if needed
+    }
 
 
 def confirm_and_send_reply(
