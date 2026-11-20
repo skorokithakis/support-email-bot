@@ -14,6 +14,7 @@
   "company_name": "Your Company",
   "support_email": "support@company.com",
   "send_emails": true,
+  "ntfy_url": "",
   "sent_folder": "Sent",
   "sent_lookback_days": 2,
   "folders": {

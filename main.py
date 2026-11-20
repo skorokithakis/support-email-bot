@@ -8,7 +8,10 @@ import argparse
 import json
 import os
 import smtplib
+import sys
 import time
+import urllib.error
+import urllib.request
 from datetime import datetime, timedelta, timezone
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -96,6 +99,36 @@ def save_state(state: dict[str, Any], config_path: str) -> None:
 
     with open(state_file_path, "w") as f:
         json.dump(state, f, indent=2)
+
+
+def send_notification(body: str, title: str = "Support bot error") -> bool:
+    """Send a push notification via ntfy. Return True on success, False otherwise.
+
+    Failures are caught and logged here so a notification problem can never
+    affect monitoring or retry behavior.
+    """
+    ntfy_url = CONFIG.get("ntfy_url")
+    if not ntfy_url:
+        return False
+
+    try:
+        request = urllib.request.Request(
+            ntfy_url,
+            data=body.encode("utf-8"),
+            headers={"Title": title},
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=10):
+            pass
+    except Exception as e:
+        # Print only the exception type (and HTTP status), never its text: the
+        # text can contain the URL or parts of it, and the topic name is a secret.
+        detail = type(e).__name__
+        if isinstance(e, urllib.error.HTTPError):
+            detail += f" (HTTP {e.code})"
+        print(f"Warning: could not send notification: {detail}")
+        return False
+    return True
 
 
 def generate_reply_content(
@@ -539,6 +572,8 @@ def process_new_emails(
         except Exception as e:
             # Increment retry count
             folder_state["retry_counts"][uid_str] = retry_count + 1
+            # retry_counts/failed_emails changed, so this cycle must save state.
+            state_changed = True
 
             # Log detailed error information
             error_msg = (
@@ -565,6 +600,18 @@ def process_new_emails(
                         "from": msg.from_,
                         "retry_count": max_retries,
                     }
+                )
+
+                # Owner requirement: no PII in notifications.
+                # smtplib.SMTPRecipientsRefused includes the recipient address in
+                # its text, so redact the sender before sending.
+                error_text = str(e)
+                if msg.from_:
+                    error_text = error_text.replace(msg.from_, "<redacted>")
+                send_notification(
+                    f"Gave up on email UID {msg.uid} in folder '{folder_name}' "
+                    f"after {max_retries} attempts: {type(e).__name__}: "
+                    f"{error_text[:300]}"
                 )
             else:
                 remaining_retries = max_retries - folder_state["retry_counts"][uid_str]
@@ -601,6 +648,7 @@ def main(
     print(
         f"Email mode: {'SENDING EMAILS' if CONFIG.get('send_emails', False) else 'DRY RUN (not sending emails)'}"
     )
+    print(f"Notifications: {'enabled' if CONFIG.get('ntfy_url') else 'disabled'}")
     if debug:
         print("Debug logging: enabled")
     print("-" * 50)
@@ -632,7 +680,9 @@ def main(
 
     state = load_state(config_path)
 
+    previous_cycle_failed = False
     while True:
+        cycle_errors: list[str] = []
         try:
             # Connect to mailbox
             with MailBox(CONFIG["imap_server"]).login(
@@ -667,6 +717,10 @@ def main(
 
                     except Exception as e:
                         print(f"\nError processing folder '{folder_name}': {str(e)}")
+                        cycle_errors.append(
+                            f"folder '{folder_name}': {type(e).__name__}: "
+                            f"{str(e)[:300]}"
+                        )
                         continue
 
                 if any_state_changed:
@@ -679,6 +733,12 @@ def main(
         except Exception as e:
             print(f"\nError: {str(e)}")
             print("Will retry in next interval...")
+            cycle_errors.append(f"connection: {type(e).__name__}: {str(e)[:300]}")
+
+        # Notify once when a run of failing cycles starts, not on every cycle.
+        if cycle_errors and not previous_cycle_failed:
+            send_notification("Cycle failed:\n" + "\n".join(cycle_errors))
+        previous_cycle_failed = bool(cycle_errors)
 
         # If running once, break after first iteration
         if once:
@@ -714,10 +774,27 @@ if __name__ == "__main__":
         action="store_true",
         help="Enable debug logging of message IDs and reply relationships",
     )
+    parser.add_argument(
+        "--test-notification",
+        action="store_true",
+        help="Send one test notification using ntfy_url and exit",
+    )
     args = parser.parse_args()
 
     # Load configuration with specified path
     CONFIG = load_config(args.config)
+
+    if args.test_notification:
+        if not CONFIG.get("ntfy_url"):
+            print("Error: ntfy_url is not configured; cannot send test notification.")
+            sys.exit(1)
+        if send_notification(
+            "Test notification from the support bot.", "Support bot test"
+        ):
+            print("Test notification sent.")
+            sys.exit(0)
+        print("Error: test notification failed; see the warning above.")
+        sys.exit(1)
 
     try:
         main(args.config, args.confirm, args.once, args.debug)

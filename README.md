@@ -34,6 +34,11 @@ uv run python main.py
 
 The bot will continuously monitor the configured folders and automatically respond to new emails using AI-generated responses based on your documentation.
 
+To send a single test notification and exit (requires `ntfy_url` in the config):
+```bash
+uv run python main.py --test-notification
+```
+
 ## Configuration
 
 The `config.json` file controls:
@@ -52,6 +57,7 @@ The `config.json` file controls:
 ### Other settings
 - `company_name` / `support_email`: Used in response templates.
 - `send_emails` (boolean): If `true`, emails will be sent. If `false` or not present, runs in dry-run mode and only prints the replies without sending them.
+- `ntfy_url` (optional): Full ntfy topic URL (for example `https://ntfy.sh/example-topic`). When set, the bot sends an ntfy push notification when it gives up on an email after all retries, and once when a run of failing cycles starts. Notifications never include the sender address or subject, and there is no ntfy authentication support. Leave empty or omit to disable notifications.
 - `sent_folder` / `sent_folders` (optional): Folder(s) to check for already-sent replies.
 - `sent_lookback_days` (optional): How many days back to look in sent folders.
 
